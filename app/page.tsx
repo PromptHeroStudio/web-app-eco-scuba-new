@@ -12,15 +12,36 @@ export default function Home() {
   const [generating, setGenerating] = useState(false)
   const [activeStep, setActiveStep] = useState(-1)
   const [generated, setGenerated] = useState(false)
+  const [packageResult, setPackageResult] = useState<{ files: { name: string; label: string; mime: string; data: string; preview: string }[] } | null>(null)
+  const [generationError, setGenerationError] = useState('')
   const validation = useMemo(() => validateProject(project), [project])
   const status = projectStatus(project)
   const passed = validation.filter(item => item.ok).length
   const update = (key: keyof Project['program'], value: string) => setProject(current => ({ ...current, program: { ...current.program, [key]: value } }))
 
   async function generate() {
-    setGenerating(true); setGenerated(false)
-    for (let index = 0; index < steps.length; index++) { setActiveStep(index); await new Promise(resolve => setTimeout(resolve, 650)) }
-    setGenerating(false); setGenerated(true); setActiveStep(steps.length)
+    setGenerating(true)
+    setGenerated(false)
+    setGenerationError('')
+    setPackageResult(null)
+    try {
+      for (let index = 0; index < steps.length; index++) {
+        setActiveStep(index)
+        await new Promise(resolve => setTimeout(resolve, 450))
+        if (index === steps.length - 1) {
+          const response = await fetch('/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(project) })
+          const result = await response.json()
+          if (!response.ok) throw new Error(result.error ?? 'Generisanje nije uspjelo')
+          setPackageResult(result)
+        }
+      }
+      setGenerated(true)
+      setActiveStep(steps.length)
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : 'Generisanje nije uspjelo')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   return <main className="shell">
@@ -36,7 +57,7 @@ export default function Home() {
         </section>
         <section className="panel validation-panel"><div className="panel-heading"><div><span className="step-number">02</span><h2>Kontrola kvaliteta</h2></div><div className={`readiness ${status}`}><span /> {status === 'ready' ? 'SPREMNO' : 'NACRT'}</div></div><div className="score"><strong>{passed}<small>/{validation.length}</small></strong><div><b>kontrola prije predaje</b><span>Validatori rade nad podacima, ne nad izgledom dokumenta.</span></div></div><div className="checks">{validation.map(item => <div className={`check-row ${item.ok ? 'ok' : 'fail'}`} key={item.validator}><div className="check-icon">{item.ok ? <Check size={14} /> : <CircleAlert size={14} />}</div><div><strong>{item.validator.replace('validate', '')}</strong><span>{item.message}</span></div><span className="check-state">{item.ok ? 'PROŠLO' : 'PAŽNJA'}</span></div>)}</div><div className="notice"><CircleAlert size={17} /><span><b>Jedno polje traži potvrdu.</b> Broj bankovnog računa nedostaje i označava paket kao nacrt.</span></div></section>
       </div>
-      <section className="generation panel"><div className="generation-top"><div><div className="eyebrow">GENERISANJE PAKETA</div><h2>{generated ? 'Paket je pripremljen.' : 'Spremni za provjeru?'}</h2><p>{generated ? 'Pregledajte fajlove i preuzmite radnu verziju ili dopunite podatke.' : 'AI popunjava model, a kod provjerava i renderuje svaki dokument.'}</p></div><button className="generate-btn" onClick={generate} disabled={generating}>{generating ? <><Loader2 className="spin" size={18} /> Generišem…</> : <>Generiši paket <ChevronRight size={18} /></>}</button></div>{(generating || generated) && <div className="progress-track">{steps.map((step, index) => <div className={`progress-step ${index < activeStep ? 'done' : index === activeStep ? 'current' : ''}`} key={step}><div className="progress-icon">{index < activeStep ? <Check size={13} /> : index === activeStep ? <Loader2 className="spin" size={13} /> : index + 1}</div><span>{step}</span></div>)}</div>}{generated && <div className="documents">{documentKinds.map(doc => <div className="document-card" key={doc.kind}><div className="doc-icon"><FileText size={20} /></div><div><strong>{doc.label}</strong><span>{doc.kind === 'budget' ? 'XLSX · žive formule' : 'DOCX · tekstualni sloj'}</span></div><a href="#preview">Pregledaj</a></div>)}<button className="zip-btn"><FolderArchive size={18} /> Preuzmi ZIP paketa</button></div>}</section>
+      <section className="generation panel"><div className="generation-top"><div><div className="eyebrow">GENERISANJE PAKETA</div><h2>{generated ? 'Paket je pripremljen.' : 'Spremni za provjeru?'}</h2><p>{generated ? 'Pregledajte fajlove i preuzmite radnu verziju ili dopunite podatke.' : 'AI popunjava model, a kod provjerava i renderuje svaki dokument.'}</p></div><button className="generate-btn" onClick={generate} disabled={generating}>{generating ? <><Loader2 className="spin" size={18} /> Generišem…</> : <>Generiši paket <ChevronRight size={18} /></>}</button></div>{(generating || generated || generationError) && <div className="progress-track">{steps.map((step, index) => <div className={`progress-step ${index < activeStep ? 'done' : index === activeStep ? 'current' : ''}`} key={step}><div className="progress-icon">{index < activeStep ? <Check size={13} /> : index === activeStep ? <Loader2 className="spin" size={13} /> : index + 1}</div><span>{step}</span></div>)}</div>}{generationError && <div className="notice"><CircleAlert size={17} /><span><b>Generisanje nije završeno.</b> {generationError}</span></div>}{generated && packageResult && <div className="documents">{packageResult.files.map(file => <div className="document-card" key={file.name}><div className="doc-icon"><FileText size={20} /></div><div><strong>{file.label}</strong><span>{file.name.endsWith('.xlsx') ? 'XLSX · žive formule' : 'DOCX · tekstualni sloj'}</span></div><a href={`data:${file.mime};base64,${file.data}`} download={file.name}>Preuzmi</a></div>)}<button className="zip-btn" type="button"><FolderArchive size={18} /> Paket generisan server-side</button></div>}</section>
       <footer><span>© 2026 KVS „S.C.U.B.A.“ Sarajevo</span><span><b>V1 CORE</b> · Strukturirani izlaz, deterministička kontrola</span></footer>
     </div>
   </main>
