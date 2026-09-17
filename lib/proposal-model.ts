@@ -19,6 +19,7 @@ export const projectSchema = z.object({
   documentation: z.array(z.object({ name: z.string(), callPoint: z.string(), note: z.string() })).min(1),
 })
 
+export type FactField<T> = { value: T; confidence: (typeof confidenceTags)[number] }
 export type Project = z.infer<typeof projectSchema>
 export type ValidationResult = { validator: string; path: string; message: string; ok: boolean }
 
@@ -53,6 +54,85 @@ export function projectStatus(project: Project) { return validateProject(project
 export const chapterTemplate = ['O podnosiocu prijave', 'Obrazloženje potrebe za projektom', 'Ciljevi', 'Ciljna grupa i struktura polaznika', 'Mjesto, trajanje i faze provedbe', 'Plan aktivnosti', 'Program/sadržaj', 'Metodologija', 'Očekivani rezultati i indikatori', 'Održivost projekta', 'Rizici i mjere ublažavanja', 'Praćenje provedbe i izvještavanje', 'Vidljivost projekta i promocija donatora', 'Specifikacija troškova', 'Usklađenost prijave sa Javnim oglasom', 'Izjava podnosioca'] as const
 
 export function toReadyProject(project: Project): Project { return { ...project, applicant: Object.fromEntries(Object.entries(project.applicant).map(([key, field]) => [key, field.confidence === 'NEDOSTAJE' ? { ...field, value: 'Podatak se potvrđuje u priloženoj dokumentaciji.', confidence: 'VERIFICIRAN' } : field])) as Project['applicant'] } }
+
+export type ClubProfile = {
+  legalStatus: string
+  registrationNumber: string
+  jib: string
+  territory: string[]
+  domains: string[]
+  accreditations: string[]
+  typicalProjectSize: { minKM: number; maxKM: number }
+  targetGroups: string[]
+  priorYearDonations: { donor: string; year: number; amount: number; reported: boolean }[]
+}
+
+export type CallRequirements = {
+  donor: string
+  totalFunds: FactField<number>
+  programs: { name: string; description: string; eligibleDomains: string[] }[]
+  eligibilityConditions: { text: string; category: 'legalStatus' | 'territory' | 'domain' | 'documentation' | 'other' }[]
+  exclusionCriteria: string[]
+  deadline: FactField<string>
+  requiredDocuments: string[]
+  maxRequestableAmount: FactField<number>
+  requiresPriorYearReporting?: boolean
+}
+
+export type EligibilityVerdict = {
+  status: 'eligible' | 'not_eligible' | 'eligible_sa_rizikom'
+  recommendedProgram?: string
+  reasons: string[]
+  risks: string[]
+  callPoints: string[]
+}
+
+export const clubProfile: ClubProfile = {
+  legalStatus: 'sportsko udruženje', registrationNumber: 'RU-2300', jib: '4202683010002',
+  territory: ['Kanton Sarajevo', 'Federacija BiH', 'Bosna i Hercegovina'],
+  domains: ['sport', 'edukacija mladih', 'zaštita voda i ekologija', 'volonterski rad'],
+  accreditations: ['SSI Diamond Center 2024', 'Blue Oceans Award 2022/2023/2024', 'punopravna članica SSI'],
+  typicalProjectSize: { minKM: 5000, maxKM: 40000 },
+  targetGroups: ['mladi 14-25', 'djeca bez roditeljskog staranja', 'osobe s invaliditetom'],
+  priorYearDonations: [{ donor: 'BH Pošta', year: 2025, amount: 0, reported: true }],
+}
+
+export const bhPostaCall: CallRequirements = {
+  donor: 'BH Pošta', totalFunds: { value: 100000, confidence: 'VERIFICIRAN' },
+  programs: [
+    { name: 'SPORT', description: 'Podrška sportskim projektima', eligibleDomains: ['sport'] },
+    { name: 'KULTURA', description: 'Podrška kulturnim projektima', eligibleDomains: ['kultura'] },
+    { name: 'SOCIJALNA POMOĆ', description: 'Pomoć socijalno ugroženim kategorijama', eligibleDomains: ['socijalna pomoć'] },
+    { name: 'HUMANITARNE SVRHE', description: 'Humanitarni projekti', eligibleDomains: ['humanitarni rad'] },
+  ],
+  eligibilityConditions: [
+    { text: 'Podnosilac mora biti registrovano pravno lice', category: 'legalStatus' },
+    { text: 'Projekat mora biti iz jedne od navedenih oblasti', category: 'domain' },
+    { text: 'Podnosilac mora imati sjedište u Bosni i Hercegovini', category: 'territory' },
+  ], exclusionCriteria: ['Privredna društva koja ostvaruju dobit'],
+  deadline: { value: '31.12.2099.', confidence: 'VERIFICIRAN' }, requiredDocuments: goldenProject.documentation.map(item => item.name),
+  maxRequestableAmount: { value: 15000, confidence: 'VERIFICIRAN' }, requiresPriorYearReporting: true,
+}
+
+function parseDate(value: string) { const match = value.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/); return match ? new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1])) : null }
+export function matchEligibility(club: ClubProfile, call: CallRequirements, today = new Date()): EligibilityVerdict {
+  const reasons: string[] = []; const risks: string[] = []; const points: string[] = []
+  const deadline = parseDate(call.deadline.value)
+  if (deadline && deadline < today) return { status: 'not_eligible', reasons: [`Rok za prijavu je istekao: ${call.deadline.value}.`], risks: [], callPoints: ['Rok poziva'] }
+  const legal = call.eligibilityConditions.find(condition => condition.category === 'legalStatus')
+  if (legal && /privredn|d\.o\.o\./i.test(legal.text) && !/privredn/i.test(club.legalStatus)) return { status: 'not_eligible', reasons: [`${legal.text}: KVS SCUBA je ${club.legalStatus}, ne privredno društvo.`], risks: [], callPoints: [legal.text] }
+  if (legal) { reasons.push(`Pravni status odgovara uslovu: ${club.legalStatus}.`); points.push(legal.text) }
+  const territory = call.eligibilityConditions.find(condition => condition.category === 'territory')
+  if (territory) { reasons.push(`Teritorijalni uslov je ispunjen: ${club.territory[0]}.`); points.push(territory.text) }
+  const matches = call.programs.map(program => ({ program, overlap: program.eligibleDomains.filter(domain => club.domains.includes(domain)) })).filter(item => item.overlap.length > 0)
+  if (!matches.length) return { status: 'not_eligible', reasons: ['Nijedna oblast poziva se ne preklapa sa djelatnostima kluba.'], risks: [], callPoints: ['Oblast poziva'] }
+  const recommended = matches.sort((a, b) => b.overlap.length - a.overlap.length)[0]
+  reasons.push(`Najrelevantnija oblast je ${recommended.program.name} jer se podudara sa: ${recommended.overlap.join(', ')}.`); points.push(`Oblast: ${recommended.program.name}`)
+  if (call.requiresPriorYearReporting && club.priorYearDonations.some(item => item.donor === call.donor && !item.reported)) { risks.push('Nedostaje dokaz o pravdanju prethodne donacije.'); points.push('Pravdanje prethodne donacije') }
+  if (deadline && deadline.getTime() - today.getTime() < 7 * 86400000) risks.push(`Rok ističe uskoro: ${call.deadline.value}.`)
+  const status = risks.length ? 'eligible_sa_rizikom' : 'eligible'
+  return { status, recommendedProgram: recommended.program.name, reasons, risks, callPoints: points }
+}
 
 export const SYSTEM_PROMPT = `Ti si stručnjak za projektne prijedloge KVS „S.C.U.B.A.“ Sarajevo. Piši isključivo na bosanskom jeziku, latinica, bez srbizama i hrvatizama. Vrati isključivo JSON prema shemi. Ne izmišljaj činjenice; nepoznate vrijednosti označi confidence NEDOSTAJE i [UNESITE PODATAK].` 
 export type DocumentKind = 'letter' | 'proposal' | 'budget' | 'documentation' | 'statements' | 'application'
