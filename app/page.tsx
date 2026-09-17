@@ -22,6 +22,7 @@ export default function Home() {
   const [authBusy, setAuthBusy] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
   const [supabase, setSupabase] = useState<ReturnType<typeof createClient> | null>(null)
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   useEffect(() => {
     const client = createClient()
     setSupabase(client)
@@ -50,11 +51,12 @@ export default function Home() {
     setGenerationError('')
     setPackageResult(null)
     try {
+      await persistProject('draft')
       for (let index = 0; index < steps.length; index++) {
         setActiveStep(index)
         await new Promise(resolve => setTimeout(resolve, 450))
         if (index === steps.length - 1) {
-          const response = await fetch('/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(project) })
+          const response = await fetch('/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...project, projectId: activeProjectId }) })
           const result = await response.json()
           if (!response.ok) throw new Error(result.error ?? 'Generisanje nije uspjelo')
           setPackageResult(result)
@@ -67,6 +69,21 @@ export default function Home() {
     } finally {
       setGenerating(false)
     }
+  }
+
+  async function persistProject(nextStatus: 'draft' | 'ready' = 'draft') {
+    if (!supabase) return null
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+    const payload = { user_id: user.id, title: project.program.title, input: project, status: nextStatus, validation }
+    if (activeProjectId) {
+      const { data, error } = await supabase.from('projects').update(payload).eq('id', activeProjectId).select('id').single()
+      if (!error && data) return data.id
+    }
+    const { data, error } = await supabase.from('projects').insert(payload).select('id').single()
+    if (error || !data) throw new Error('Projekt nije moguće sačuvati.')
+    setActiveProjectId(data.id)
+    return data.id
   }
 
   async function uploadCall(file: File) {
@@ -82,9 +99,11 @@ export default function Home() {
     const extractionResponse = await fetch('/api/extract-call', { method: 'POST', body: extractionForm })
     const extraction = await extractionResponse.json() as { text?: string; ocrUsed?: boolean; needsOcr?: boolean; error?: string }
     if (!extractionResponse.ok) { setAuthMessage(extraction.error ?? 'PDF nije moguće pročitati.'); return }
+    const projectId = await persistProject()
+    if (!projectId) return
     const upload = await supabase.storage.from('project-files').upload(path, file, { contentType: 'application/pdf', upsert: false })
     if (upload.error) { setAuthMessage('PDF nije moguće sačuvati.'); return }
-    const saved = await supabase.from('public_calls').insert({ user_id: user.id, file_path: path, file_name: file.name, mime_type: 'application/pdf', extracted_text: extraction.text ?? null, ocr_used: extraction.ocrUsed ?? false }).select('id').single()
+    const saved = await supabase.from('public_calls').insert({ user_id: user.id, project_id: projectId, file_path: path, file_name: file.name, mime_type: 'application/pdf', extracted_text: extraction.text ?? null, ocr_used: extraction.ocrUsed ?? false }).select('id').single()
     if (saved.error) setAuthMessage('Metapodaci poziva nisu sačuvani.')
     else if (extraction.needsOcr) setAuthMessage('PDF je sačuvan, ali izgleda kao sken. OCR korak je potreban prije AI ekstrakcije.')
   }

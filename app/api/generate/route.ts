@@ -86,16 +86,16 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Prijava je obavezna za generisanje i čuvanje paketa.' }, { status: 401 })
 
-  const { data: projectRow, error: projectError } = await supabase.from('projects').insert({
-    user_id: user.id,
-    title: parsed.data.program.title,
-    input: parsed.data,
-    status: 'draft',
-    validation: [],
-  }).select('id').single()
+  const requestedProjectId = typeof body === 'object' && body !== null && 'projectId' in body && typeof body.projectId === 'string' ? body.projectId : null
+  const projectQuery = requestedProjectId
+    ? supabase.from('projects').update({ title: parsed.data.program.title, input: parsed.data, status: 'draft', validation: [] }).eq('id', requestedProjectId).eq('user_id', user.id).select('id').single()
+    : supabase.from('projects').insert({ user_id: user.id, title: parsed.data.program.title, input: parsed.data, status: 'draft', validation: [] }).select('id').single()
+  const { data: projectRow, error: projectError } = await projectQuery
   if (projectError || !projectRow) return NextResponse.json({ error: 'Projekat nije moguće sačuvati.' }, { status: 500 })
 
   const result = await generatePackage(parsed.data)
+  const finalStatus = result.status === 'ready' ? 'ready' : 'draft'
+  await supabase.from('projects').update({ status: finalStatus, validation: result.validation }).eq('id', projectRow.id).eq('user_id', user.id)
   const persistedFiles = []
   for (const file of result.files) {
     const bytes = Buffer.from(file.data, 'base64')
