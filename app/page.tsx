@@ -129,17 +129,42 @@ export default function Home() {
 
   async function authenticate(mode: 'login' | 'signup') {
     if (!supabase) return
-    setAuthBusy(true); setAuthMessage('')
+    setAuthBusy(true)
+    setAuthMessage('')
+    const redirectTo = process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback`
     const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email: userEmail, password: userPassword })
-      : await supabase.auth.signUp({ email: userEmail, password: userPassword, options: { emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback` } })
+      ? await supabase.auth.signInWithPassword({ email: userEmail.trim(), password: userPassword })
+      : await supabase.auth.signUp({ email: userEmail.trim(), password: userPassword, options: { emailRedirectTo: redirectTo } })
     setAuthBusy(false)
-    if (result.error) setAuthMessage(mode === 'login' ? 'Neispravan email ili lozinka.' : 'Registracija nije završena. Provjerite email za potvrdu.')
-    else if (mode === 'signup') setAuthMessage('Potvrdite email adresu, zatim se prijavite.')
-    else setAuthenticated(true)
+    if (result.error) {
+      const message = result.error.message.toLowerCase()
+      if (mode === 'login' && (message.includes('email not confirmed') || message.includes('not confirmed'))) {
+        setAuthMessage('Email još nije potvrđen. Otvorite link iz poruke za potvrdu, pa pokušajte ponovo.')
+      } else if (mode === 'signup' && message.includes('already registered')) {
+        setAuthMessage('Ovaj email već postoji. Prijavite se ili zatražite novu poruku za potvrdu.')
+      } else {
+        setAuthMessage(mode === 'login' ? 'Neispravan email ili lozinka.' : 'Registracija nije završena. Provjerite email adresu i pokušajte ponovo.')
+      }
+      return
+    }
+    if (mode === 'signup') {
+      if (result.data.session) setAuthenticated(true)
+      else setAuthMessage('Registracija je zaprimljena. Potvrdite email adresu, zatim se prijavite.')
+    } else {
+      setAuthenticated(true)
+    }
   }
 
-  if (!authenticated) return <main className="shell"><div className="workspace auth-screen"><section className="panel auth-panel"><img className="auth-logo" src="/logo.png" alt="ECO SCUBA" /><div className="eyebrow">ECO SCUBA · ZAŠTIĆENI RADNI PROSTOR</div><h1>Prijavite se za<br /><em>novi projektni paket.</em></h1><p>Vaši pozivi, projekti i dokumenti ostaju privatni i dostupni samo Vašem nalogu.</p><label>EMAIL<input type="email" value={userEmail} onChange={event => setUserEmail(event.target.value)} placeholder="vas@email.ba" /></label><label>LOZINKA<input type="password" value={userPassword} onChange={event => setUserPassword(event.target.value)} placeholder="Najmanje 6 znakova" /></label><div className="auth-actions"><button className="generate-btn" disabled={authBusy || !userEmail || !userPassword} onClick={() => authenticate('login')}>{authBusy ? 'Provjera…' : 'Prijavi se'}<ChevronRight size={18} /></button><button className="text-button" disabled={authBusy} onClick={() => authenticate('signup')}>Napravi nalog</button></div>{authMessage && <div className="notice"><CircleAlert size={17} /><span>{authMessage}</span></div>}</section></div></main>
+  async function resendConfirmation() {
+    if (!supabase || !userEmail.trim()) return
+    setAuthBusy(true)
+    setAuthMessage('')
+    const { error } = await supabase.auth.resend({ type: 'signup', email: userEmail.trim(), options: { emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback` } })
+    setAuthBusy(false)
+    setAuthMessage(error ? 'Poruku nije moguće poslati. Provjerite email adresu i pokušajte ponovo.' : 'Nova poruka za potvrdu je poslana. Provjerite prijemno sanduče i spam folder.')
+  }
+
+  if (!authenticated) return <main className="shell"><div className="workspace auth-screen"><section className="panel auth-panel"><img className="auth-logo" src="/logo.png" alt="ECO SCUBA" /><div className="eyebrow">ECO SCUBA · ZAŠTIĆENI RADNI PROSTOR</div><h1>Prijavite se za<br /><em>novi projektni paket.</em></h1><p>Vaši pozivi, projekti i dokumenti ostaju privatni i dostupni samo Vašem nalogu.</p><label>EMAIL<input type="email" value={userEmail} onChange={event => setUserEmail(event.target.value)} placeholder="vas@email.ba" /></label><label>LOZINKA<input type="password" value={userPassword} onChange={event => setUserPassword(event.target.value)} placeholder="Najmanje 6 znakova" /></label><div className="auth-actions"><button className="generate-btn" disabled={authBusy || !userEmail || !userPassword} onClick={() => authenticate('login')}>{authBusy ? 'Provjera…' : 'Prijavi se'}<ChevronRight size={18} /></button><button className="text-button" disabled={authBusy} onClick={() => authenticate('signup')}>Napravi nalog</button></div>{authMessage && <div className="notice"><CircleAlert size={17} /><span>{authMessage}</span></div>}<button className="text-button auth-resend" type="button" disabled={authBusy || !userEmail} onClick={() => void resendConfirmation()}>Pošalji ponovo email za potvrdu</button></section></div></main>
 
   return <main className="shell">
     <header className="topbar"><div className="brand"><div className="brand-mark"><img src="/logo.png" alt="" /></div><div><strong>ECO SCUBA</strong><span>Projektni studio</span></div></div><div className="top-status"><span className="status-dot" /> Radni prostor KVS „S.C.U.B.A.“ <span className="avatar">AD</span></div></header>
