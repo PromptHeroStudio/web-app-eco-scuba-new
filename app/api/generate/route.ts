@@ -5,32 +5,59 @@ import { parseProject, projectSchema, SYSTEM_PROMPT } from '@/lib/proposal-model
 export const runtime = 'nodejs'
 export const maxDuration = 90
 
-async function callAnthropic(userPrompt: string) {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY
-  if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY nije konfigurisan na serveru')
+const GOOGLE_KEY_NAMES = Array.from({ length: 8 }, (_, index) => `GOOGLE_API_KEY_${index + 1}`)
+let nextGoogleKey = 0
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',
-      max_tokens: 8000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  })
+function getGoogleKeys() {
+  return GOOGLE_KEY_NAMES.map((name) => process.env[name]).filter((key): key is string => Boolean(key?.trim()))
+}
 
-  if (!response.ok) throw new Error(`Anthropic API greška (${response.status})`)
-  const data = await response.json()
-  const text = data?.content?.[0]?.text
-  if (typeof text !== 'string') throw new Error('Anthropic odgovor nema tekstualni sadržaj')
-  const parsed = parseProject(JSON.parse(text))
-  if (!parsed.success) throw new Error(`AI model nije vratio validan projektni model: ${parsed.error.issues[0]?.message ?? 'nepoznata greška'}`)
-  return parsed.data
+function extractJson(text: string) {
+  const normalized = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
+  try {
+    return JSON.parse(normalized)
+  } catch {
+    const start = normalized.indexOf('{')
+    const end = normalized.lastIndexOf('}')
+    if (start < 0 || end <= start) throw new Error('Google AI odgovor nije validan JSON')
+    return JSON.parse(normalized.slice(start, end + 1))
+  }
+}
+
+async function callGoogle(userPrompt: string) {
+  const keys = getGoogleKeys()
+  if (keys.length === 0) throw new Error('Nijedan GOOGLE_API_KEY_1–GOOGLE_API_KEY_8 nije konfigurisan na serveru')
+
+  const startIndex = nextGoogleKey++ % keys.length
+  let lastError = 'Google AI poziv nije uspio'
+
+  for (let attempt = 0; attempt < keys.length; attempt += 1) {
+    const apiKey = keys[(startIndex + attempt) % keys.length]
+    const model = process.env.GOOGLE_MODEL ?? 'gemini-2.5-flash'
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+      }),
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? '').join('')
+      if (typeof text !== 'string' || !text.trim()) throw new Error('Google AI odgovor nema tekstualni sadržaj')
+      const parsed = parseProject(extractJson(text))
+      if (!parsed.success) throw new Error(`AI model nije vratio validan projektni model: ${parsed.error.issues[0]?.message ?? 'nepoznata greška'}`)
+      return parsed.data
+    }
+
+    lastError = `Google AI greška (${response.status})`
+    if (![429, 500, 502, 503, 504].includes(response.status)) break
+  }
+
+  throw new Error(`${lastError}; iscrpljena je rotacija ${keys.length} dostupnih ključeva`)
 }
 
 export async function POST(request: Request) {
@@ -44,7 +71,7 @@ export async function POST(request: Request) {
   if (typeof body === 'object' && body !== null && 'mode' in body && body.mode === 'ai') {
     const aiBody = body as { mode: 'ai'; prompt?: unknown }
     try {
-      const project = await callAnthropic(String(aiBody.prompt ?? 'Popuni projektni model prema dostavljenom kontekstu.'))
+      const project = await callGoogle(String(aiBody.prompt ?? 'Popuni projektni model prema dostavljenom kontekstu.'))
       return NextResponse.json({ project, schema: projectSchema.description ?? 'ProjectProposal' })
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'AI generisanje nije uspjelo' }, { status: 502 })
