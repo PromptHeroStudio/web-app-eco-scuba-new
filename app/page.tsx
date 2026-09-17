@@ -75,10 +75,18 @@ export default function Home() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const path = `${user.id}/calls/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const upload = await supabase.storage.from('project-files').upload(path, file, { contentType: file.type || 'application/pdf', upsert: false })
+    if (file.type !== 'application/pdf') { setAuthMessage('Dozvoljen je samo PDF format.'); return }
+    if (file.size > 25 * 1024 * 1024) { setAuthMessage('PDF je veći od dozvoljenih 25 MB.'); return }
+    const extractionForm = new FormData()
+    extractionForm.append('file', file)
+    const extractionResponse = await fetch('/api/extract-call', { method: 'POST', body: extractionForm })
+    const extraction = await extractionResponse.json() as { text?: string; ocrUsed?: boolean; needsOcr?: boolean; error?: string }
+    if (!extractionResponse.ok) { setAuthMessage(extraction.error ?? 'PDF nije moguće pročitati.'); return }
+    const upload = await supabase.storage.from('project-files').upload(path, file, { contentType: 'application/pdf', upsert: false })
     if (upload.error) { setAuthMessage('PDF nije moguće sačuvati.'); return }
-    const saved = await supabase.from('public_calls').insert({ user_id: user.id, file_path: path, file_name: file.name, mime_type: file.type || 'application/pdf', ocr_used: false }).select('id').single()
+    const saved = await supabase.from('public_calls').insert({ user_id: user.id, file_path: path, file_name: file.name, mime_type: 'application/pdf', extracted_text: extraction.text ?? null, ocr_used: extraction.ocrUsed ?? false }).select('id').single()
     if (saved.error) setAuthMessage('Metapodaci poziva nisu sačuvani.')
+    else if (extraction.needsOcr) setAuthMessage('PDF je sačuvan, ali izgleda kao sken. OCR korak je potreban prije AI ekstrakcije.')
   }
 
   async function authenticate(mode: 'login' | 'signup') {
