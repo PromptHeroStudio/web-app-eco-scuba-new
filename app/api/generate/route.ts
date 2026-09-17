@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { generatePackage } from '@/lib/document-generators'
 import { parseProject, projectSchema, SYSTEM_PROMPT } from '@/lib/proposal-model'
 
@@ -80,5 +81,30 @@ export async function POST(request: Request) {
 
   const parsed = parseProject(body)
   if (!parsed.success) return NextResponse.json({ error: 'Model projekta nije validan', issues: parsed.error.issues }, { status: 422 })
-  return NextResponse.json(await generatePackage(parsed.data))
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Prijava je obavezna za generisanje i čuvanje paketa.' }, { status: 401 })
+
+  const { data: projectRow, error: projectError } = await supabase.from('projects').insert({
+    user_id: user.id,
+    title: parsed.data.program.title,
+    input: parsed.data,
+    status: 'draft',
+    validation: [],
+  }).select('id').single()
+  if (projectError || !projectRow) return NextResponse.json({ error: 'Projekat nije moguće sačuvati.' }, { status: 500 })
+
+  const result = await generatePackage(parsed.data)
+  const persistedFiles = []
+  for (const file of result.files) {
+    const bytes = Buffer.from(file.data, 'base64')
+    const path = `${user.id}/${projectRow.id}/${file.name}`
+    const upload = await supabase.storage.from('project-files').upload(path, bytes, { contentType: file.mime, upsert: true })
+    if (upload.error) return NextResponse.json({ error: 'Dokument nije moguće sačuvati u Storage.' }, { status: 500 })
+    const row = await supabase.from('project_documents').insert({ user_id: user.id, project_id: projectRow.id, kind: file.label, file_path: path, status: 'draft', metadata: { mime: file.mime, previewAvailable: Boolean(file.preview) } }).select('id').single()
+    if (row.error) return NextResponse.json({ error: 'Metapodaci dokumenta nisu sačuvani.' }, { status: 500 })
+    persistedFiles.push({ ...file, projectId: projectRow.id, documentId: row.data?.id })
+  }
+  return NextResponse.json({ ...result, projectId: projectRow.id, files: persistedFiles })
 }

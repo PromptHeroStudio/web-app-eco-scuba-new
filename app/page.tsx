@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Check, ChevronRight, CircleAlert, Eye, FileText, Loader2, UploadCloud } from 'lucide-react'
 import { bhPostaCall, clubProfile, createDemoProject, matchEligibility, projectStatus, validateProject, type Project } from '@/lib/proposal-model'
 
@@ -15,6 +16,24 @@ export default function Home() {
   const [packageResult, setPackageResult] = useState<{ files: { name: string; label: string; mime: string; data: string; preview: string }[] } | null>(null)
   const [generationError, setGenerationError] = useState('')
   const [gateConfirmed, setGateConfirmed] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
+  const [userPassword, setUserPassword] = useState('')
+  const [authenticated, setAuthenticated] = useState(false)
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authMessage, setAuthMessage] = useState('')
+  const [supabase, setSupabase] = useState<ReturnType<typeof createClient> | null>(null)
+  useEffect(() => {
+    const client = createClient()
+    setSupabase(client)
+    let active = true
+    void (async () => {
+      const { data } = await client.auth.getUser()
+      if (!active) return
+      setAuthenticated(Boolean(data.user))
+      if (data.user?.email) setUserEmail(data.user.email)
+    })()
+    return () => { active = false }
+  }, [supabase])
   const eligibility = useMemo(() => matchEligibility(clubProfile, bhPostaCall), [])
   const validation = useMemo(() => validateProject(project), [project])
   const status = projectStatus(project)
@@ -50,6 +69,32 @@ export default function Home() {
     }
   }
 
+  async function uploadCall(file: File) {
+    if (!supabase) return
+    setCallName(file.name)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const path = `${user.id}/calls/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const upload = await supabase.storage.from('project-files').upload(path, file, { contentType: file.type || 'application/pdf', upsert: false })
+    if (upload.error) { setAuthMessage('PDF nije moguće sačuvati.'); return }
+    const saved = await supabase.from('public_calls').insert({ user_id: user.id, file_path: path, file_name: file.name, mime_type: file.type || 'application/pdf', ocr_used: false }).select('id').single()
+    if (saved.error) setAuthMessage('Metapodaci poziva nisu sačuvani.')
+  }
+
+  async function authenticate(mode: 'login' | 'signup') {
+    if (!supabase) return
+    setAuthBusy(true); setAuthMessage('')
+    const result = mode === 'login'
+      ? await supabase.auth.signInWithPassword({ email: userEmail, password: userPassword })
+      : await supabase.auth.signUp({ email: userEmail, password: userPassword, options: { emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback` } })
+    setAuthBusy(false)
+    if (result.error) setAuthMessage(mode === 'login' ? 'Neispravan email ili lozinka.' : 'Registracija nije završena. Provjerite email za potvrdu.')
+    else if (mode === 'signup') setAuthMessage('Potvrdite email adresu, zatim se prijavite.')
+    else setAuthenticated(true)
+  }
+
+  if (!authenticated) return <main className="shell"><div className="workspace auth-screen"><section className="panel auth-panel"><div className="eyebrow">ECO SCUBA · ZAŠTIĆENI RADNI PROSTOR</div><h1>Prijavite se za<br /><em>novi projektni paket.</em></h1><p>Vaši pozivi, projekti i dokumenti ostaju privatni i dostupni samo Vašem nalogu.</p><label>EMAIL<input type="email" value={userEmail} onChange={event => setUserEmail(event.target.value)} placeholder="vas@email.ba" /></label><label>LOZINKA<input type="password" value={userPassword} onChange={event => setUserPassword(event.target.value)} placeholder="Najmanje 6 znakova" /></label><div className="auth-actions"><button className="generate-btn" disabled={authBusy || !userEmail || !userPassword} onClick={() => authenticate('login')}>{authBusy ? 'Provjera…' : 'Prijavi se'}<ChevronRight size={18} /></button><button className="text-button" disabled={authBusy} onClick={() => authenticate('signup')}>Napravi nalog</button></div>{authMessage && <div className="notice"><CircleAlert size={17} /><span>{authMessage}</span></div>}</section></div></main>
+
   return <main className="shell">
     <header className="topbar"><div className="brand"><div className="brand-mark">SC</div><div><strong>ECO SCUBA</strong><span>Projektni studio</span></div></div><div className="top-status"><span className="status-dot" /> Radni prostor KVS „S.C.U.B.A.“ <span className="avatar">AD</span></div></header>
     <div className="workspace">
@@ -57,7 +102,7 @@ export default function Home() {
       <section className="eligibility-gate panel"><div className="panel-heading"><div><span className="step-number">00</span><h2>Da li poziv odgovara klubu?</h2></div><span className={`readiness ${eligibility.status === 'eligible' ? 'ready' : 'draft'}`}><span /> {eligibility.status === 'eligible' ? 'ELIGIBLE' : 'PROVJERA'}</span></div><p className="gate-lead">Analiza poziva se završava prije unosa projekta. Matcher provjerava formalne uslove, oblast, teritoriju i rok.</p><div className="gate-grid"><div><small>PREDLOŽENA KOMPONENTA</small><strong>{eligibility.recommendedProgram ?? 'Nema podudaranja'}</strong></div><div><small>OSNOV ZAKLJUČKA</small><span>{eligibility.reasons[0]}</span></div></div>{eligibility.risks.length > 0 && <div className="notice"><CircleAlert size={17} /><span><b>Rizici prije nastavka:</b> {eligibility.risks.join(' ')}</span></div>}<div className="gate-actions"><span>{eligibility.callPoints.length} tačaka poziva provjereno</span><button className="generate-btn" type="button" onClick={() => setGateConfirmed(true)} disabled={eligibility.status === 'not_eligible' || gateConfirmed}>{gateConfirmed ? 'Komponenta potvrđena' : `Nastavi i generiši za ${eligibility.recommendedProgram ?? 'odabranu oblast'}`}<ChevronRight size={18} /></button></div></section>
       <div className="layout-grid">
         <section className="panel input-panel"><div className="panel-heading"><div><span className="step-number">01</span><h2>Ulazni podaci</h2></div><span className="quiet-label">2 ekrana</span></div>
-          <label className="upload-box"><UploadCloud size={22} /><span><strong>{callName}</strong><small>PDF · 4.8 MB · tekst je uspješno ekstrahovan</small></span><Check className="upload-check" size={20} /></label>
+          <label className="upload-box" htmlFor="call-upload"><UploadCloud size={22} /><span><strong>{callName}</strong><small>PDF · upload u privatni Supabase Storage</small></span><Check className="upload-check" size={20} /><input id="call-upload" type="file" accept="application/pdf" className="sr-only" onChange={event => { const file = event.target.files?.[0]; if (file) void uploadCall(file) }} /></label>
           <div className="field-grid"><label>NAZIV PROJEKTA<input value={project.program.title} onChange={e => update('title', e.target.value)} /></label><label>OBLAST<input value={project.program.field} onChange={e => update('field', e.target.value)} /></label><label>TRAJANJE<input value={project.program.duration} onChange={e => update('duration', e.target.value)} /></label><label>TRAŽENI IZNOS (KM)<input type="number" value={project.program.requestedFromDonor} onChange={e => update('requestedFromDonor', e.target.value)} /></label></div>
           <label className="wide-field">OPIS POTREBE<textarea value={project.program.need} onChange={e => update('need', e.target.value)} rows={3} /></label>
           <div className="club-card"><div className="club-monogram">S</div><div><small>PODNOSILAC PRIJAVE</small><strong>{project.applicant.name.value}</strong><span>{project.applicant.address.value}</span></div><button type="button">Uredi profil <ChevronRight size={14} /></button></div>
