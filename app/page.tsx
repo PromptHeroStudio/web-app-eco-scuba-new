@@ -34,7 +34,7 @@ export default function Home() {
       if (data.user?.email) setUserEmail(data.user.email)
     })()
     return () => { active = false }
-  }, [supabase])
+  }, [])
   const eligibility = useMemo(() => matchEligibility(clubProfile, bhPostaCall), [])
   const validation = useMemo(() => validateProject(project), [project])
   const status = projectStatus(project)
@@ -60,6 +60,7 @@ export default function Home() {
           const result = await response.json()
           if (!response.ok) throw new Error(result.error ?? 'Generisanje nije uspjelo')
           setPackageResult(result)
+          await persistGeneratedDocuments(result.files)
         }
       }
       setGenerated(true)
@@ -84,6 +85,24 @@ export default function Home() {
     if (error || !data) throw new Error('Projekt nije moguće sačuvati.')
     setActiveProjectId(data.id)
     return data.id
+  }
+
+  async function persistGeneratedDocuments(files: { name: string; label: string; mime: string; data: string; preview: string }[]) {
+    if (!supabase || !activeProjectId) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    for (const file of files) {
+      const path = `${user.id}/projects/${activeProjectId}/${file.name}`
+      const bytes = Uint8Array.from(atob(file.data), character => character.charCodeAt(0))
+      const upload = await supabase.storage.from('project-files').upload(path, bytes, { contentType: file.mime, upsert: true })
+      if (upload.error) throw new Error(`Dokument ${file.label} nije moguće sačuvati.`)
+      const previewPath = `${user.id}/projects/${activeProjectId}/preview-${file.name.replace(/\\.[^.]+$/, '')}.pdf`
+      const previewBytes = Uint8Array.from(atob(file.preview), character => character.charCodeAt(0))
+      const previewUpload = await supabase.storage.from('project-files').upload(previewPath, previewBytes, { contentType: 'application/pdf', upsert: true })
+      if (previewUpload.error) throw new Error(`Pregled dokumenta ${file.label} nije moguće sačuvati.`)
+      const saved = await supabase.from('project_documents').insert({ user_id: user.id, project_id: activeProjectId, kind: file.label, file_path: path, preview_path: previewPath, status: status === 'ready' ? 'ready' : 'draft', metadata: { source: 'server-render', preview: true } })
+      if (saved.error) throw new Error(`Metapodaci dokumenta ${file.label} nisu sačuvani.`)
+    }
   }
 
   async function uploadCall(file: File) {
@@ -120,7 +139,7 @@ export default function Home() {
     else setAuthenticated(true)
   }
 
-  if (!authenticated) return <main className="shell"><div className="workspace auth-screen"><section className="panel auth-panel"><div className="eyebrow">ECO SCUBA · ZAŠTIĆENI RADNI PROSTOR</div><h1>Prijavite se za<br /><em>novi projektni paket.</em></h1><p>Vaši pozivi, projekti i dokumenti ostaju privatni i dostupni samo Vašem nalogu.</p><label>EMAIL<input type="email" value={userEmail} onChange={event => setUserEmail(event.target.value)} placeholder="vas@email.ba" /></label><label>LOZINKA<input type="password" value={userPassword} onChange={event => setUserPassword(event.target.value)} placeholder="Najmanje 6 znakova" /></label><div className="auth-actions"><button className="generate-btn" disabled={authBusy || !userEmail || !userPassword} onClick={() => authenticate('login')}>{authBusy ? 'Provjera…' : 'Prijavi se'}<ChevronRight size={18} /></button><button className="text-button" disabled={authBusy} onClick={() => authenticate('signup')}>Napravi nalog</button></div>{authMessage && <div className="notice"><CircleAlert size={17} /><span>{authMessage}</span></div>}</section></div></main>
+  if (!authenticated) return <main className="shell"><div className="workspace auth-screen"><section className="panel auth-panel"><img className="auth-logo" src="/logo.png" alt="ECO SCUBA" /><div className="eyebrow">ECO SCUBA · ZAŠTIĆENI RADNI PROSTOR</div><h1>Prijavite se za<br /><em>novi projektni paket.</em></h1><p>Vaši pozivi, projekti i dokumenti ostaju privatni i dostupni samo Vašem nalogu.</p><label>EMAIL<input type="email" value={userEmail} onChange={event => setUserEmail(event.target.value)} placeholder="vas@email.ba" /></label><label>LOZINKA<input type="password" value={userPassword} onChange={event => setUserPassword(event.target.value)} placeholder="Najmanje 6 znakova" /></label><div className="auth-actions"><button className="generate-btn" disabled={authBusy || !userEmail || !userPassword} onClick={() => authenticate('login')}>{authBusy ? 'Provjera…' : 'Prijavi se'}<ChevronRight size={18} /></button><button className="text-button" disabled={authBusy} onClick={() => authenticate('signup')}>Napravi nalog</button></div>{authMessage && <div className="notice"><CircleAlert size={17} /><span>{authMessage}</span></div>}</section></div></main>
 
   return <main className="shell">
     <header className="topbar"><div className="brand"><div className="brand-mark">SC</div><div><strong>ECO SCUBA</strong><span>Projektni studio</span></div></div><div className="top-status"><span className="status-dot" /> Radni prostor KVS „S.C.U.B.A.“ <span className="avatar">AD</span></div></header>
@@ -136,7 +155,7 @@ export default function Home() {
         </section>
         <section className="panel validation-panel"><div className="panel-heading"><div><span className="step-number">02</span><h2>Kontrola kvaliteta</h2></div><div className={`readiness ${status}`}><span /> {status === 'ready' ? 'SPREMNO' : 'NACRT'}</div></div><div className="score"><strong>{passed}<small>/{validation.length}</small></strong><div><b>kontrola prije predaje</b><span>Validatori rade nad podacima, ne nad izgledom dokumenta.</span></div></div><div className="checks">{validation.map(item => <div className={`check-row ${item.ok ? 'ok' : 'fail'}`} key={item.validator}><div className="check-icon">{item.ok ? <Check size={14} /> : <CircleAlert size={14} />}</div><div><strong>{item.validator.replace('validate', '')}</strong><span>{item.message}</span></div><span className="check-state">{item.ok ? 'PROŠLO' : 'PAŽNJA'}</span></div>)}</div><div className="notice"><CircleAlert size={17} /><span><b>Jedno polje traži potvrdu.</b> Broj bankovnog računa nedostaje i označava paket kao nacrt.</span></div></section>
       </div>
-      <section className="generation panel"><div className="generation-top"><div><div className="eyebrow">GENERISANJE PAKETA</div><h2>{generated ? 'Paket je pripremljen.' : 'Spremni za provjeru?'}</h2><p>{generated ? 'Pregledajte fajlove i preuzmite radnu verziju ili dopunite podatke.' : 'AI popunjava model, a kod provjerava i renderuje svaki dokument.'}</p></div><button className="generate-btn" onClick={generate} disabled={generating || !gateConfirmed}>{generating ? <><Loader2 className="spin" size={18} /> Generišem…</> : <>Generiši paket <ChevronRight size={18} /></>}</button></div>{(generating || generated || generationError) && <div className="progress-track">{steps.map((step, index) => <div className={`progress-step ${index < activeStep ? 'done' : index === activeStep ? 'current' : ''}`} key={step}><div className="progress-icon">{index < activeStep ? <Check size={13} /> : index === activeStep ? <Loader2 className="spin" size={13} /> : index + 1}</div><span>{step}</span></div>)}</div>}{generationError && <div className="notice"><CircleAlert size={17} /><span><b>Generisanje nije završeno.</b> {generationError}</span></div>}{generated && packageResult && <div className="documents"><div className="documents-heading"><div><span className="eyebrow">PREGLED PRIJE PREUZIMANJA</span><h3>Ovako izgleda Vaš dokument</h3></div><span className="preview-note"><Eye size={15} /> PDF raster provjera</span></div>{packageResult.files.map(file => <article className="document-card" key={file.name}><div className="preview-frame"><iframe title={`Pregled: ${file.label}`} src={`data:application/pdf;base64,${file.preview}`} /></div><div className="document-meta"><div className="doc-icon"><FileText size={20} /></div><div><strong>{file.label}</strong><span>{file.name.endsWith('.xlsx') ? 'XLSX · žive formule' : 'DOCX · tekstualni sloj'}</span></div><a href={`data:${file.mime};base64,${file.data}`} download={file.name} aria-label={`Preuzmi ${file.label}${status === 'ready' ? '' : ' kao radnu verziju'}`}>{status === 'ready' ? 'Preuzmi' : 'Radna verzija'}</a></div></article>)}</div>}</section>
+      <section className="generation panel"><div className="generation-top"><div><div className="eyebrow">GENERISANJE PAKETA</div><h2>{generated ? 'Paket je pripremljen.' : 'Spremni za provjeru?'}</h2><p>{generated ? 'Pregledajte fajlove i preuzmite radnu verziju ili dopunite podatke.' : 'AI popunjava model, a kod provjerava i renderuje svaki dokument.'}</p></div><button className="generate-btn" onClick={generate} disabled={generating || !gateConfirmed}>{generating ? <><img className="loader-logo" src="/logo.png" alt="" /> Generišem…</> : <>Generiši paket <ChevronRight size={18} /></>}</button></div>{(generating || generated || generationError) && <div className="progress-track">{steps.map((step, index) => <div className={`progress-step ${index < activeStep ? 'done' : index === activeStep ? 'current' : ''}`} key={step}><div className="progress-icon">{index < activeStep ? <Check size={13} /> : index === activeStep ? <Loader2 className="spin" size={13} /> : index + 1}</div><span>{step}</span></div>)}</div>}{generationError && <div className="notice"><CircleAlert size={17} /><span><b>Generisanje nije završeno.</b> {generationError}</span></div>}{generated && packageResult && <div className="documents"><div className="documents-heading"><div><span className="eyebrow">PREGLED PRIJE PREUZIMANJA</span><h3>Ovako izgleda Vaš dokument</h3></div><span className="preview-note"><Eye size={15} /> PDF raster provjera</span></div>{packageResult.files.map(file => <article className="document-card" key={file.name}><div className="preview-frame"><iframe title={`Pregled: ${file.label}`} src={`data:application/pdf;base64,${file.preview}`} /></div><div className="document-meta"><div className="doc-icon"><FileText size={20} /></div><div><strong>{file.label}</strong><span>{file.name.endsWith('.xlsx') ? 'XLSX · žive formule' : 'DOCX · tekstualni sloj'}</span></div><a href={`data:${file.mime};base64,${file.data}`} download={file.name} aria-label={`Preuzmi ${file.label}${status === 'ready' ? '' : ' kao radnu verziju'}`}>{status === 'ready' ? 'Preuzmi' : 'Radna verzija'}</a></div></article>)}</div>}</section>
       <footer><span>© 2026 KVS „S.C.U.B.A.“ Sarajevo</span><span><b>V1 CORE</b> · Strukturirani izlaz, deterministička kontrola</span></footer>
     </div>
   </main>
