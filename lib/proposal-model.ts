@@ -53,7 +53,9 @@ export function projectStatus(project: Project) { return validateProject(project
 
 export const chapterTemplate = ['O podnosiocu prijave', 'Obrazloženje potrebe za projektom', 'Ciljevi', 'Ciljna grupa i struktura polaznika', 'Mjesto, trajanje i faze provedbe', 'Plan aktivnosti', 'Program/sadržaj', 'Metodologija', 'Očekivani rezultati i indikatori', 'Održivost projekta', 'Rizici i mjere ublažavanja', 'Praćenje provedbe i izvještavanje', 'Vidljivost projekta i promocija donatora', 'Specifikacija troškova', 'Usklađenost prijave sa Javnim oglasom', 'Izjava podnosioca'] as const
 
-export function toReadyProject(project: Project): Project { return { ...project, applicant: Object.fromEntries(Object.entries(project.applicant).map(([key, field]) => [key, field.confidence === 'NEDOSTAJE' ? { ...field, value: 'Podatak se potvrđuje u priloženoj dokumentaciji.', confidence: 'VERIFICIRAN' } : field])) as Project['applicant'] } }
+export function toReadyProject(project: Project): Project {
+  return project
+}
 
 export type ClubProfile = {
   legalStatus: string

@@ -50,4 +50,24 @@ export async function generateBudgetXlsx(project: Project): Promise<Buffer> { co
 
 export async function generatePdf(project: Project, kind: DocumentKind): Promise<Buffer> { const pdf = await PDFDocument.create(); const page = pdf.addPage([595, 842]); const font = await pdf.embedFont(StandardFonts.Helvetica); page.drawText(documentKinds.find(item => item.kind === kind)?.label ?? 'Dokument', { x: 48, y: 790, size: 20, font, color: rgb(0.05, 0.35, 0.4) }); page.drawText(project.program.title, { x: 48, y: 755, size: 11, font, maxWidth: 500 }); page.drawText(`Traženi iznos: ${money(project.program.requestedFromDonor)}`, { x: 48, y: 720, size: 11, font }); page.drawText('Ovaj PDF je generisan iz validiranog strukturiranog modela podataka.', { x: 48, y: 660, size: 10, font }); return Buffer.from(await pdf.save()) }
 
-export async function generatePackage(project: Project) { const validation = validateProject(project); const status = projectStatus(project); const files = await Promise.all(documentKinds.map(async ({ kind, label }) => ({ name: `${kind}.docx`, label, mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', data: (kind === 'budget' ? await generateBudgetXlsx(project) : await generateDocx(project, kind)).toString('base64'), preview: (await generatePdf(project, kind)).toString('base64') }))); return { status, validation, files } }
+export async function generatePackage(project: Project) {
+  const validation = validateProject(project)
+  const status = projectStatus(project)
+  const files = await Promise.all(documentKinds.map(async ({ kind, label }) => {
+    const isBudget = kind === 'budget'
+    const extension = isBudget ? 'xlsx' : 'docx'
+    const mime = isBudget
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const data = isBudget ? await generateBudgetXlsx(project) : await generateDocx(project, kind)
+    const preview = await generatePdf(project, kind)
+    return {
+      name: `${kind}.${extension}`,
+      label,
+      mime,
+      data: data.toString('base64'),
+      preview: preview.toString('base64'),
+    }
+  }))
+  return { status, validation, files }
+}

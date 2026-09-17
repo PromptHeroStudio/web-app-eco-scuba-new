@@ -34,10 +34,17 @@ async function callAnthropic(userPrompt: string) {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json()
-  if (body?.mode === 'ai') {
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Zahtjev mora sadržati validan JSON.' }, { status: 400 })
+  }
+
+  if (typeof body === 'object' && body !== null && 'mode' in body && body.mode === 'ai') {
+    const aiBody = body as { mode: 'ai'; prompt?: unknown }
     try {
-      const project = await callAnthropic(String(body.prompt ?? 'Popuni projektni model prema dostavljenom kontekstu.'))
+      const project = await callAnthropic(String(aiBody.prompt ?? 'Popuni projektni model prema dostavljenom kontekstu.'))
       return NextResponse.json({ project, schema: projectSchema.description ?? 'ProjectProposal' })
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'AI generisanje nije uspjelo' }, { status: 502 })
