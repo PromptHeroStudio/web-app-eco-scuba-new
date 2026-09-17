@@ -13,7 +13,7 @@ describe('Node document generators', () => {
   it('creates an XLSX with live budget formulas', async () => {
     const buffer = await generateBudgetXlsx(createDemoProject())
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer)
+    await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0])
     const sheet = workbook.getWorksheet('Budžet')
     expect(sheet).toBeDefined()
     expect(sheet?.getCell('F2').value).toEqual({ formula: 'C2*D2' })

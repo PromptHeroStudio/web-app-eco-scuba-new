@@ -8,13 +8,41 @@ const heading = (text: string) => new Paragraph({ text, heading: HeadingLevel.HE
 const cell = (text: string, bold = false) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold })] })] })
 
 function projectBody(project: Project) {
-  return [heading(project.program.title), new Paragraph(project.program.need), heading('1. O podnosiocu prijave'), new Paragraph(`${project.applicant.name.value}\n${project.applicant.address.value}\n${project.applicant.contact.value}`), ...chapterTemplate.slice(1).map((chapter, index) => heading(`${index + 2}. ${chapter}`)), new Paragraph(project.program.generalGoal), heading('Plan aktivnosti'), new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ children: ['Br.', 'Aktivnost', 'Period', 'Rezultat'].map(value => cell(value, true)) }), ...project.activities.map(activity => new TableRow({ children: [String(activity.no), activity.activity, activity.period, activity.result].map(value => cell(value)) }))] }), heading('Usklađenost sa Javnim oglasom'), new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ children: ['Tačka', 'Zahtjev', 'Ispunjenje'].map(value => cell(value, true)) }), ...project.callCompliance.map(item => new TableRow({ children: [item.callPoint, item.requirement, item.fulfillment].map(value => cell(value)) }))] })]
+  const activityRows = project.activities.map(activity =>
+    new TableRow({
+      children: [String(activity.no), activity.activity, activity.period, activity.result].map(value => cell(value)),
+    }),
+  )
+  const complianceRows = project.callCompliance.map(item =>
+    new TableRow({
+      children: [item.callPoint, item.requirement, item.fulfillment].map(value => cell(value)),
+    }),
+  )
+
+  return [
+    heading(project.program.title),
+    new Paragraph({ text: project.program.need }),
+    heading('1. O podnosiocu prijave'),
+    new Paragraph({ text: `${project.applicant.name.value}\n${project.applicant.address.value}\n${project.applicant.contact.value}` }),
+    ...chapterTemplate.slice(1).map((chapter, index) => heading(`${index + 2}. ${chapter}`)),
+    new Paragraph({ text: project.program.generalGoal }),
+    heading('Plan aktivnosti'),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [new TableRow({ children: ['Br.', 'Aktivnost', 'Period', 'Rezultat'].map(value => cell(value, true)) }), ...activityRows],
+    }),
+    heading('Usklađenost sa Javnim oglasom'),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [new TableRow({ children: ['Tačka', 'Zahtjev', 'Ispunjenje'].map(value => cell(value, true)) }), ...complianceRows],
+    }),
+  ]
 }
 
 export async function generateDocx(project: Project, kind: DocumentKind): Promise<Buffer> {
   const title = documentKinds.find(item => item.kind === kind)?.label ?? 'Projektni dokument'
   const children = kind === 'proposal' ? projectBody(project) : [heading(title), new Paragraph(`KVS „S.C.U.B.A.“ Sarajevo · ${project.program.title}`), new Paragraph(kind === 'letter' ? `Poštovani, Klub vodenih sportova „S.C.U.B.A.“ Sarajevo prijavljuje projekat ${project.program.title} i traži podršku u iznosu ${money(project.program.requestedFromDonor)}.` : kind === 'statements' ? project.statements.map(statement => `• ${statement}`).join('\n') : project.documentation.map(item => `${item.name} · ${item.callPoint} · ${item.note}`).join('\n'))]
-  const doc = new Document({ sections: [{ properties: {}, footers: { default: new Footer({ children: [new Paragraph({ children: [new TextRun('KVS „S.C.U.B.A.“ Sarajevo · '), PageNumber.CURRENT] })] }) }, children }] })
+  const doc = new Document({ sections: [{ properties: {}, footers: { default: new Footer({ children: [new Paragraph({ children: [new TextRun('KVS „S.C.U.B.A.“ Sarajevo · '), new TextRun({ children: [PageNumber.CURRENT] })] })] }) }, children }] })
   return Buffer.from(await Packer.toBuffer(doc))
 }
 
