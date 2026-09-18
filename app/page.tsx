@@ -163,7 +163,7 @@ export default function Home() {
     if (!supabase) return
     setAuthBusy(true)
     setAuthMessage('')
-    const redirectTo = `${window.location.origin}/auth/callback`
+    const redirectTo = 'https://eco-scuba-aplikacija-rekonstruk.v0.build/auth/callback'
     const result = mode === 'login'
       ? await supabase.auth.signInWithPassword({ email: userEmail.trim(), password: userPassword })
       : await supabase.auth.signUp({ email: userEmail.trim(), password: userPassword, options: { emailRedirectTo: redirectTo } })
@@ -191,7 +191,7 @@ export default function Home() {
     if (!supabase) return
     setAuthBusy(true)
     setAuthMessage('Preusmjeravanje na Google prijavu…')
-    const redirectTo = `${window.location.origin}/auth/callback`
+    const redirectTo = 'https://eco-scuba-aplikacija-rekonstruk.v0.build/auth/callback'
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
     if (error) { setAuthBusy(false); setAuthMessage('Google prijava nije dostupna. Provjerite da je Google provider uključen u Supabase Auth postavkama.') }
   }
