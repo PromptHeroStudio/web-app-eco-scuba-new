@@ -9,7 +9,9 @@ const steps = ['Ekstrakcija poziva', 'AI popunjava sekcije', 'Deterministička v
 
 export default function Home() {
   const [project, setProject] = useState<Project>(createDemoProject())
-  const [callName, setCallName] = useState('02 — Javni oglas za dodjelu donacija 2026.pdf')
+  const [callName, setCallName] = useState('Nije učitan javni poziv')
+  const [callText, setCallText] = useState('')
+  const [callAnalysisStatus, setCallAnalysisStatus] = useState<'missing' | 'extracted' | 'ocr'>('missing')
   const [generating, setGenerating] = useState(false)
   const [activeStep, setActiveStep] = useState(-1)
   const [generated, setGenerated] = useState(false)
@@ -56,7 +58,13 @@ export default function Home() {
         setActiveStep(index)
         await new Promise(resolve => setTimeout(resolve, 450))
         if (index === steps.length - 1) {
-          const response = await fetch('/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...project, projectId: activeProjectId }) })
+          const aiResponse = await fetch('/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'ai', prompt: JSON.stringify({ instructions: 'Analiziraj javni poziv kao primarni izvor istine. Dopuni projektni model za KVS SCUBA samo provjerljivim podacima. Za svaki nepoznat podatak koristi confidence NEDOSTAJE i [UNESITE PODATAK]. Uskladi ciljeve, aktivnosti, indikatore, budžet i dokumentaciju sa konkretnim zahtjevima poziva. Vrati samo JSON model.', publicCall: { fileName: callName, extractedText: callText }, clubProfile: { name: 'KVS S.C.U.B.A. Sarajevo', legalStatus: 'sportsko udruženje', territory: ['Kanton Sarajevo', 'Federacija BiH', 'Bosna i Hercegovina'], domains: ['sport', 'edukacija mladih', 'zaštita voda i ekologija', 'volonterski rad'], accreditations: ['SSI Diamond Center 2024', 'Blue Oceans Award 2022/2023/2024'] }, currentProject: project }) }) })
+          if (aiResponse.ok) {
+            const aiResult = await aiResponse.json() as { project?: Project }
+            if (aiResult.project) setProject(aiResult.project)
+            if (aiResult.project) Object.assign(project, aiResult.project)
+          }
+          const response = await fetch('/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...project, projectId: activeProjectId, publicCall: { fileName: callName, extractedText: callText, extractionStatus: callAnalysisStatus } }) })
           const result = await response.json()
           if (!response.ok) throw new Error(result.error ?? 'Generisanje nije uspjelo')
           setPackageResult(result)
@@ -108,6 +116,9 @@ export default function Home() {
   async function uploadCall(file: File) {
     if (!supabase) return
     setCallName(file.name)
+    setCallText('')
+    setCallAnalysisStatus('missing')
+    setAuthMessage('Učitavanje i semantička analiza javnog poziva su u toku…')
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const path = `${user.id}/calls/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
@@ -118,6 +129,9 @@ export default function Home() {
     const extractionResponse = await fetch('/api/extract-call', { method: 'POST', body: extractionForm })
     const extraction = await extractionResponse.json() as { text?: string; ocrUsed?: boolean; needsOcr?: boolean; error?: string }
     if (!extractionResponse.ok) { setAuthMessage(extraction.error ?? 'PDF nije moguće pročitati.'); return }
+    setCallText(extraction.text ?? '')
+    setCallAnalysisStatus(extraction.ocrUsed ? 'ocr' : 'extracted')
+    setAuthMessage(extraction.ocrUsed ? 'PDF je učitan i tekst je dobijen OCR analizom.' : 'PDF je učitan; tekst javnog poziva je spreman za AI analizu.')
     const projectId = await persistProject()
     if (!projectId) return
     const upload = await supabase.storage.from('project-files').upload(path, file, { contentType: 'application/pdf', upsert: false })
@@ -180,7 +194,7 @@ export default function Home() {
         </section>
         <section className="panel validation-panel"><div className="panel-heading"><div><span className="step-number">02</span><h2>Kontrola kvaliteta</h2></div><div className={`readiness ${status}`}><span /> {status === 'ready' ? 'SPREMNO' : 'NACRT'}</div></div><div className="score"><strong>{passed}<small>/{validation.length}</small></strong><div><b>kontrola prije predaje</b><span>Validatori rade nad podacima, ne nad izgledom dokumenta.</span></div></div><div className="checks">{validation.map(item => <div className={`check-row ${item.ok ? 'ok' : 'fail'}`} key={item.validator}><div className="check-icon">{item.ok ? <Check size={14} /> : <CircleAlert size={14} />}</div><div><strong>{item.validator.replace('validate', '')}</strong><span>{item.message}</span></div><span className="check-state">{item.ok ? 'PROŠLO' : 'PAŽNJA'}</span></div>)}</div><div className="notice"><CircleAlert size={17} /><span><b>Jedno polje traži potvrdu.</b> Broj bankovnog računa nedostaje i označava paket kao nacrt.</span></div></section>
       </div>
-      <section className="generation panel"><div className="generation-top"><div><div className="eyebrow">GENERISANJE PAKETA</div><h2>{generated ? 'Paket je pripremljen.' : 'Spremni za provjeru?'}</h2><p>{generated ? 'Pregledajte fajlove i preuzmite radnu verziju ili dopunite podatke.' : 'AI popunjava model, a kod provjerava i renderuje svaki dokument.'}</p></div><button className="generate-btn" onClick={generate} disabled={generating || !gateConfirmed}>{generating ? <><img className="loader-logo" src="/logo.png" alt="" /> Generišem…</> : <>Generiši paket <ChevronRight size={18} /></>}</button></div>{(generating || generated || generationError) && <div className="progress-track">{steps.map((step, index) => <div className={`progress-step ${index < activeStep ? 'done' : index === activeStep ? 'current' : ''}`} key={step}><div className="progress-icon">{index < activeStep ? <Check size={13} /> : index === activeStep ? <Loader2 className="spin" size={13} /> : index + 1}</div><span>{step}</span></div>)}</div>}{generationError && <div className="notice"><CircleAlert size={17} /><span><b>Generisanje nije završeno.</b> {generationError}</span></div>}{generated && packageResult && <div className="documents"><div className="documents-heading"><div><span className="eyebrow">PREGLED PRIJE PREUZIMANJA</span><h3>Ovako izgleda Vaš dokument</h3></div><span className="preview-note"><Eye size={15} /> PDF raster provjera</span></div>{packageResult.files.map(file => <article className="document-card" key={file.name}><div className="preview-frame"><iframe title={`Pregled: ${file.label}`} src={`data:application/pdf;base64,${file.preview}`} /></div><div className="document-meta"><div className="doc-icon"><FileText size={20} /></div><div><strong>{file.label}</strong><span>{file.name.endsWith('.xlsx') ? 'XLSX · žive formule' : 'DOCX · tekstualni sloj'}</span></div><a href={`data:${file.mime};base64,${file.data}`} download={file.name} aria-label={`Preuzmi ${file.label}${status === 'ready' ? '' : ' kao radnu verziju'}`}>{status === 'ready' ? 'Preuzmi' : 'Radna verzija'}</a></div></article>)}</div>}</section>
+      <section className="generation panel"><div className="generation-top"><div><div className="eyebrow">GENERISANJE PAKETA</div><h2>{generated ? 'Paket je pripremljen.' : 'Spremni za provjeru?'}</h2><p>{generated ? 'Pregledajte fajlove i preuzmite radnu verziju ili dopunite podatke.' : 'AI popunjava model, a kod provjerava i renderuje svaki dokument.'}</p></div><button className="generate-btn" onClick={generate} disabled={generating || !gateConfirmed || callText.trim().length < 40}>{generating ? <><img className="loader-logo" src="/logo.png" alt="" /> Generišem…</> : <>Generiši paket <ChevronRight size={18} /></>}</button></div>{(generating || generated || generationError) && <div className="progress-track">{steps.map((step, index) => <div className={`progress-step ${index < activeStep ? 'done' : index === activeStep ? 'current' : ''}`} key={step}><div className="progress-icon">{index < activeStep ? <Check size={13} /> : index === activeStep ? <Loader2 className="spin" size={13} /> : index + 1}</div><span>{step}</span></div>)}</div>}{generationError && <div className="notice"><CircleAlert size={17} /><span><b>Generisanje nije završeno.</b> {generationError}</span></div>}{generated && packageResult && <div className="documents"><div className="documents-heading"><div><span className="eyebrow">PREGLED PRIJE PREUZIMANJA</span><h3>Ovako izgleda Vaš dokument</h3></div><span className="preview-note"><Eye size={15} /> PDF raster provjera</span></div>{packageResult.files.map(file => <article className="document-card" key={file.name}><div className="preview-frame"><iframe title={`Pregled: ${file.label}`} src={`data:application/pdf;base64,${file.preview}`} /></div><div className="document-meta"><div className="doc-icon"><FileText size={20} /></div><div><strong>{file.label}</strong><span>{file.name.endsWith('.xlsx') ? 'XLSX · žive formule' : 'DOCX · tekstualni sloj'}</span></div><a href={`data:${file.mime};base64,${file.data}`} download={file.name} aria-label={`Preuzmi ${file.label}${status === 'ready' ? '' : ' kao radnu verziju'}`}>{status === 'ready' ? 'Preuzmi' : 'Radna verzija'}</a></div></article>)}</div>}</section>
       <footer><span>© 2026 KVS „S.C.U.B.A.“ Sarajevo</span><span><b>V1 CORE</b> · Strukturirani izlaz, deterministička kontrola</span></footer>
     </div>
   </main>
