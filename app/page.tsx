@@ -163,7 +163,7 @@ export default function Home() {
     if (!supabase) return
     setAuthBusy(true)
     setAuthMessage('')
-    const redirectTo = process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback`
+    const redirectTo = `${window.location.origin}/auth/callback`
     const result = mode === 'login'
       ? await supabase.auth.signInWithPassword({ email: userEmail.trim(), password: userPassword })
       : await supabase.auth.signUp({ email: userEmail.trim(), password: userPassword, options: { emailRedirectTo: redirectTo } })
@@ -191,7 +191,7 @@ export default function Home() {
     if (!supabase) return
     setAuthBusy(true)
     setAuthMessage('Preusmjeravanje na Google prijavu…')
-    const redirectTo = process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback`
+    const redirectTo = `${window.location.origin}/auth/callback`
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
     if (error) { setAuthBusy(false); setAuthMessage('Google prijava nije dostupna. Provjerite da je Google provider uključen u Supabase Auth postavkama.') }
   }
@@ -200,7 +200,7 @@ export default function Home() {
     if (!supabase || !userEmail.trim()) return
     setAuthBusy(true)
     setAuthMessage('')
-    const { error } = await supabase.auth.resend({ type: 'signup', email: userEmail.trim(), options: { emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ?? `${window.location.origin}/auth/callback` } })
+    const { error } = await supabase.auth.resend({ type: 'signup', email: userEmail.trim(), options: { emailRedirectTo: `${window.location.origin}/auth/callback` } })
     setAuthBusy(false)
     setAuthMessage(error ? 'Poruku nije moguće poslati. Provjerite email adresu i pokušajte ponovo.' : 'Nova poruka za potvrdu je poslana. Provjerite prijemno sanduče i spam folder.')
   }
