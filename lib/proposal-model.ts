@@ -38,6 +38,14 @@ export const goldenProject: Project = {
   documentation: [{ name: 'Propratno pismo podnosioca prijave', callPoint: '—', note: 'Original, potpisan i ovjeren' }, { name: 'Prijava za dodjelu donacija', callPoint: 'V.a', note: 'Original, potpisan i ovjeren' }, { name: 'Prijedlog projekta sa specifikacijom troškova', callPoint: 'V.d', note: 'Original, potpisan i ovjeren' }, { name: 'Razrada budžeta', callPoint: 'V.d', note: 'Original, potpisan i ovjeren' }, { name: 'Izjave podnosioca prijave', callPoint: '—', note: 'Original, potpisan i ovjeren' }, { name: 'Rješenje o registraciji i uvjerenje o JIB-u', callPoint: 'V.b–V.c', note: 'Ovjerene fotokopije' }, { name: 'Potvrda poslovne banke', callPoint: 'V.e', note: 'Fotokopija' }],
 }
 
+export function createEmptyProject(): Project {
+  return {
+    ...goldenProject,
+    program: { ...goldenProject.program, title: '', field: '', duration: '', startDate: '', endDate: '', location: '', totalBudget: 0, requestedFromDonor: 0, ownCash: 0, ownInKind: 0, need: '', generalGoal: '', specificGoals: [''], sustainability: '', methodology: '', monitoring: '', visibility: '' },
+    targetGroup: { description: '', size: 0, structure: '', inclusion: '' }, phases: [], activities: [], modules: [], results: [], risks: [], budget: [], callCompliance: [], statements: [], documentation: [],
+  }
+}
+
 export function parseProject(input: unknown) { return projectSchema.safeParse(input) }
 export function budgetAmount(line: Project['budget'][number]) { return line.quantity * line.unitPrice }
 export function budgetTotals(project: Project) { return project.budget.reduce((totals, line) => { totals[line.source] += budgetAmount(line); totals.total += budgetAmount(line); return totals }, { donor: 0, ownCash: 0, ownInKind: 0, total: 0 }) }
